@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
 
-const MODEL = 'fal-ai/flux-2/klein/9b/edit'
-const BASE = `https://queue.fal.run/${MODEL}/requests`
+const MODEL_QUEUE = 'fal-ai/flux-2'
+const BASE = `https://queue.fal.run/${MODEL_QUEUE}/requests`
 const REQUEST_ID_RE = /^[A-Za-z0-9-]{20,80}$/
 
 type Context = { params: Promise<{ requestId: string }> }
