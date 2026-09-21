@@ -241,12 +241,24 @@ export default function PlanStudio() {
   const sendCommand = (type: 'top' | 'perspective' | 'capture' | 'snapshot') => setCommand((value) => ({ id: value.id + 1, type }))
   const onSceneReady = useCallback((ready: boolean) => setSceneReady(ready), [])
   const onSnapshot = useCallback(async (imageDataUrl: string) => {
-    setRendering(true); setRenderError(''); setPhotorealUrl(''); setActiveStep(4); setStatus('Generating photorealistic interior…')
+    setRendering(true); setRenderError(''); setPhotorealUrl(''); setActiveStep(4); setStatus('Submitting photorealistic render…')
     try {
       const response = await fetch('/api/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageDataUrl, prompt: renderPrompt }) })
-      const data = await response.json() as { imageUrl?: string; error?: string }
-      if (!response.ok || !data.imageUrl) throw new Error(data.error || 'Rendering failed')
-      setPhotorealUrl(data.imageUrl); setStatus('Photorealistic render ready'); notify('Photorealistic render completed')
+      const submission = await response.json() as { requestId?: string; error?: string }
+      if (!response.ok || !submission.requestId) throw new Error(submission.error || 'Rendering failed')
+      setStatus('Render queued · waiting for the image model…')
+      for (let attempt = 0; attempt < 48; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, attempt < 2 ? 1000 : 2500))
+        const poll = await fetch(`/api/render/${encodeURIComponent(submission.requestId)}`, { cache: 'no-store' })
+        const result = await poll.json() as { status?: string; imageUrl?: string; error?: string }
+        if (!poll.ok || result.status === 'FAILED') throw new Error(result.error || 'Rendering failed')
+        if (result.status === 'COMPLETED' && result.imageUrl) {
+          setPhotorealUrl(result.imageUrl); setStatus('Photorealistic render ready'); notify('Photorealistic render completed')
+          return
+        }
+        setStatus(result.status === 'IN_QUEUE' ? 'Render queued · waiting for capacity…' : 'Creating photorealistic interior…')
+      }
+      throw new Error('The render is still processing. Please try again shortly.')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Rendering failed'
       setRenderError(message); setStatus('Photorealistic rendering needs attention'); notify(message)
