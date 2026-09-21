@@ -75,6 +75,7 @@ export default function PlanStudio() {
   const [sceneReady, setSceneReady] = useState(false)
   const [command, setCommand] = useState<{ id: number; type: SceneCommand }>({ id: 0, type: 'perspective' })
   const [cameraView, setCameraView] = useState<CameraView>('A')
+  const [activeRenderView, setActiveRenderView] = useState<CameraView>('A')
   const [renderPrompt, setRenderPrompt] = useState('Warm contemporary Singapore apartment, natural oak cabinetry, soft neutral upholstery, stone finishes, daylight, elegant realistic styling')
   const [rendering, setRendering] = useState(false)
   const [renderAccessCode, setRenderAccessCode] = useState('')
@@ -243,12 +244,14 @@ export default function PlanStudio() {
 
   const buildScene = () => {
     if (!activeSegments.length) { notify('Keep or add at least one wall'); return }
-    setSceneSegments(segments.map((segment) => ({ ...segment }))); setSceneReady(false); setActiveStep(3); setStatus('Building editable 3D model…')
+    setSceneSegments(segments.map((segment) => ({ ...segment }))); setSceneReady(false); setCameraView('A'); setCommand((value) => ({ id: value.id + 1, type: 'view-a' })); setActiveStep(3); setStatus('Building editable 3D model…')
     window.setTimeout(() => { setStatus('Editable 3D model ready'); notify('Walls, openings and furniture rendered in 3D') }, 250)
   }
   const sendCommand = (type: SceneCommand) => setCommand((value) => ({ id: value.id + 1, type }))
   const chooseCameraView = (view: CameraView) => {
     setCameraView(view)
+    const existing = renderedViews.find((item) => item.label === view)
+    if (existing) { setActiveRenderView(view); setPhotorealUrl(existing.imageUrl); setShellUrl(existing.shellUrl); setComparison(100) }
     sendCommand(`view-${view.toLowerCase()}` as SceneCommand)
     setActiveStep(3)
   }
@@ -269,7 +272,7 @@ export default function PlanStudio() {
         if (!poll.ok || result.status === 'FAILED') throw new Error(result.error || 'Rendering failed')
         if (result.status === 'COMPLETED' && result.imageUrl) {
           const completed = { id: `${cameraView}-${Date.now()}`, label: cameraView, imageUrl: result.imageUrl, shellUrl: imageDataUrl }
-          setPhotorealUrl(result.imageUrl); setShellUrl(imageDataUrl); setComparison(100)
+          setPhotorealUrl(result.imageUrl); setShellUrl(imageDataUrl); setActiveRenderView(cameraView); setComparison(100)
           setRenderedViews((items) => [completed, ...items.filter((item) => item.label !== cameraView)])
           setStatus(`Photorealistic View ${cameraView} ready`); notify(`Photorealistic View ${cameraView} completed`)
           return
@@ -330,14 +333,14 @@ export default function PlanStudio() {
             {renderError && <p className="render-error">{renderError}</p>}
             {photorealUrl && shellUrl && <div className="photoreal-result">
               <div className="render-comparison">
-                <NextImage unoptimized fill src={shellUrl} alt={`Three-dimensional shell for View ${cameraView}`} />
-                <div className="ai-layer" style={{ clipPath: `inset(0 ${100 - comparison}% 0 0)` }}><NextImage unoptimized fill src={photorealUrl} alt={`AI-generated photorealistic interior View ${cameraView}`} /></div>
-                <div className="render-badges"><span>Interior · View {cameraView}</span><span>Ceiling {Math.round(wallHeight * 1000).toLocaleString()} mm</span></div>
+                <NextImage unoptimized fill src={shellUrl} alt={`Three-dimensional shell for View ${activeRenderView}`} />
+                <div className="ai-layer" style={{ clipPath: `inset(0 ${100 - comparison}% 0 0)` }}><NextImage unoptimized fill src={photorealUrl} alt={`AI-generated photorealistic interior View ${activeRenderView}`} /></div>
+                <div className="render-badges"><span>Interior · View {activeRenderView}</span><span>Ceiling {Math.round(wallHeight * 1000).toLocaleString()} mm</span></div>
               </div>
               <label className="comparison-control"><span>Shell</span><input type="range" min="0" max="100" value={comparison} onChange={(event) => setComparison(+event.target.value)} /><span>AI render</span></label>
               <a href={photorealUrl} target="_blank" rel="noreferrer">Open full-resolution render ↗</a>
             </div>}
-            {renderedViews.length > 0 && <div className="render-gallery">{renderedViews.slice().sort((a, b) => a.label.localeCompare(b.label)).map((view) => <button key={view.id} className={photorealUrl === view.imageUrl ? 'active' : ''} onClick={() => { setCameraView(view.label); setPhotorealUrl(view.imageUrl); setShellUrl(view.shellUrl); setComparison(100) }}><NextImage unoptimized width={180} height={108} src={view.imageUrl} alt={`Rendered View ${view.label}`} /><span>{view.label}</span></button>)}</div>}
+            {renderedViews.length > 0 && <div className="render-gallery">{renderedViews.slice().sort((a, b) => a.label.localeCompare(b.label)).map((view) => <button key={view.id} className={photorealUrl === view.imageUrl ? 'active' : ''} onClick={() => { setCameraView(view.label); setActiveRenderView(view.label); setPhotorealUrl(view.imageUrl); setShellUrl(view.shellUrl); setComparison(100); sendCommand(`view-${view.label.toLowerCase()}` as SceneCommand) }}><NextImage unoptimized width={180} height={108} src={view.imageUrl} alt={`Rendered View ${view.label}`} /><span>{view.label}</span></button>)}</div>}
           </div>
         </section>
       </section>}
