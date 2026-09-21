@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { hasRenderAccess } from '../../../../lib/render-auth'
 
 export const runtime = 'nodejs'
 
@@ -8,9 +9,10 @@ const REQUEST_ID_RE = /^[A-Za-z0-9-]{20,80}$/
 
 type Context = { params: Promise<{ requestId: string }> }
 
-export async function GET(_request: Request, context: Context) {
+export async function GET(request: Request, context: Context) {
   const key = process.env.FAL_KEY
   if (!key) return NextResponse.json({ error: 'Photorealistic rendering is not configured.' }, { status: 503 })
+  if (!hasRenderAccess(request)) return NextResponse.json({ error: 'Enter the valid demo access code to retrieve this render.' }, { status: 401 })
   const { requestId } = await context.params
   if (!REQUEST_ID_RE.test(requestId)) return NextResponse.json({ error: 'Invalid render request ID.' }, { status: 400 })
 

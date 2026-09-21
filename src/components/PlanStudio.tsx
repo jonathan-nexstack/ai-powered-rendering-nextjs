@@ -73,6 +73,7 @@ export default function PlanStudio() {
   const [command, setCommand] = useState<{ id: number; type: 'top' | 'perspective' | 'capture' | 'snapshot' }>({ id: 0, type: 'perspective' })
   const [renderPrompt, setRenderPrompt] = useState('Warm contemporary Singapore apartment, natural oak cabinetry, soft neutral upholstery, stone finishes, daylight, elegant realistic styling')
   const [rendering, setRendering] = useState(false)
+  const [renderAccessCode, setRenderAccessCode] = useState('')
   const [photorealUrl, setPhotorealUrl] = useState('')
   const [renderError, setRenderError] = useState('')
   const [toast, setToast] = useState('')
@@ -243,13 +244,14 @@ export default function PlanStudio() {
   const onSnapshot = useCallback(async (imageDataUrl: string) => {
     setRendering(true); setRenderError(''); setPhotorealUrl(''); setActiveStep(4); setStatus('Submitting photorealistic render…')
     try {
-      const response = await fetch('/api/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageDataUrl, prompt: renderPrompt }) })
+      const renderHeaders = { 'Content-Type': 'application/json', 'x-render-access-code': renderAccessCode }
+      const response = await fetch('/api/render', { method: 'POST', headers: renderHeaders, body: JSON.stringify({ imageDataUrl, prompt: renderPrompt }) })
       const submission = await response.json() as { requestId?: string; error?: string }
       if (!response.ok || !submission.requestId) throw new Error(submission.error || 'Rendering failed')
       setStatus('Render queued · waiting for the image model…')
       for (let attempt = 0; attempt < 48; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, attempt < 2 ? 1000 : 2500))
-        const poll = await fetch(`/api/render/${encodeURIComponent(submission.requestId)}`, { cache: 'no-store' })
+        const poll = await fetch(`/api/render/${encodeURIComponent(submission.requestId)}`, { cache: 'no-store', headers: { 'x-render-access-code': renderAccessCode } })
         const result = await poll.json() as { status?: string; imageUrl?: string; error?: string }
         if (!poll.ok || result.status === 'FAILED') throw new Error(result.error || 'Rendering failed')
         if (result.status === 'COMPLETED' && result.imageUrl) {
@@ -263,7 +265,7 @@ export default function PlanStudio() {
       const message = error instanceof Error ? error.message : 'Rendering failed'
       setRenderError(message); setStatus('Photorealistic rendering needs attention'); notify(message)
     } finally { setRendering(false) }
-  }, [renderPrompt, notify])
+  }, [renderAccessCode, renderPrompt, notify])
   const reset = () => { setStudio(false); setSceneSegments([]); setSceneObjects([]); setSceneReady(false); setPhotorealUrl(''); setRenderError(''); setActiveStep(1); setStatus('Ready for a layout plan'); setImage(null); setRaster(null); setSegments([]) }
 
   const toolHint = placementKind ? `Click the plan to place ${objectPresets[placementKind].label}` : tool === 'select' ? 'Click a line to include or exclude it' : tool === 'add' ? 'Drag across the drawing to add a wall' : 'Drag a rectangle around the apartment plan'
@@ -303,7 +305,7 @@ export default function PlanStudio() {
         </section>
         <section className="viewer-panel"><div className="viewer-head"><div><p className="eyebrow">Editable 3D + AI render</p><h2>Camera view</h2></div><span className="chip">{sceneReady ? 'Live geometry' : 'Awaiting geometry'}</span></div><div className="viewer">{sceneSegments.length ? <ThreeScene segments={sceneSegments} objects={sceneObjects} crop={crop} planWidth={planWidth} wallHeight={wallHeight} wallThickness={wallThickness} theme={theme} command={command} onReady={onSceneReady} onSnapshot={onSnapshot} /> : <div className="viewer-empty"><span>◇</span><strong>No model yet</strong><small>Complete Steps 1–2 and build the editable 3D model.</small></div>}</div>
           <div className="viewer-actions"><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('top')}>Top view</button><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('perspective')}>Perspective</button><button className="dark" disabled={!sceneReady} onClick={() => sendCommand('capture')}>Download 3D view</button></div>
-          <div className="render-panel"><strong>Photorealistic render</strong><textarea value={renderPrompt} onChange={(event) => setRenderPrompt(event.target.value)} rows={3} placeholder="Describe materials, furniture style and lighting" /><button className="primary wide" disabled={!sceneReady || rendering} onClick={() => sendCommand('snapshot')}>{rendering ? 'Generating photorealistic image…' : 'Generate photorealistic render'}</button>{renderError && <p className="render-error">{renderError}</p>}{photorealUrl && <div className="photoreal-result"><NextImage unoptimized width={1200} height={675} src={photorealUrl} alt="AI-generated photorealistic interior render" /><a href={photorealUrl} target="_blank" rel="noreferrer">Open full-resolution render ↗</a></div>}</div>
+          <div className="render-panel"><strong>Photorealistic render</strong><label className="demo-code-label">Demo access code<input type="password" autoComplete="off" value={renderAccessCode} onChange={(event) => setRenderAccessCode(event.target.value)} placeholder="Required on the public demo" /></label><textarea value={renderPrompt} onChange={(event) => setRenderPrompt(event.target.value)} rows={3} placeholder="Describe materials, furniture style and lighting" /><button className="primary wide" disabled={!sceneReady || rendering} onClick={() => sendCommand('snapshot')}>{rendering ? 'Generating photorealistic image…' : 'Generate photorealistic render'}</button>{renderError && <p className="render-error">{renderError}</p>}{photorealUrl && <div className="photoreal-result"><NextImage unoptimized width={1200} height={675} src={photorealUrl} alt="AI-generated photorealistic interior render" /><a href={photorealUrl} target="_blank" rel="noreferrer">Open full-resolution render ↗</a></div>}</div>
         </section>
       </section>}
     </main>

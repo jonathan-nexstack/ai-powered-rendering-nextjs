@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { hasRenderAccess } from '../../../lib/render-auth'
 
 export const runtime = 'nodejs'
 
@@ -9,6 +10,7 @@ const DATA_URL_RE = /^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2}
 export async function POST(request: Request) {
   const key = process.env.FAL_KEY
   if (!key) return NextResponse.json({ error: 'Photorealistic rendering is not configured yet. Add FAL_KEY in Vercel.' }, { status: 503 })
+  if (!hasRenderAccess(request)) return NextResponse.json({ error: 'Enter the valid demo access code to generate a render.' }, { status: 401 })
 
   const contentLength = Number(request.headers.get('content-length') ?? 0)
   if (contentLength && contentLength > 4_000_000) return NextResponse.json({ error: 'The camera snapshot is too large.' }, { status: 413 })
