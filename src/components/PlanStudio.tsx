@@ -1,9 +1,11 @@
 'use client'
 
+import NextImage from 'next/image'
 import { PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ThreeScene from './ThreeScene'
 import { detectWalls } from '@/lib/geometry'
-import type { Crop, Raster, WallSegment } from '@/lib/types'
+import { objectPresets } from '@/lib/scene-objects'
+import type { Crop, Raster, SceneObject, SceneObjectKind, WallSegment } from '@/lib/types'
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
 
@@ -64,8 +66,15 @@ export default function PlanStudio() {
   const [wallThickness, setWallThickness] = useState(0.12)
   const [theme, setTheme] = useState<'warm' | 'light' | 'dark'>('warm')
   const [sceneSegments, setSceneSegments] = useState<WallSegment[]>([])
+  const [sceneObjects, setSceneObjects] = useState<SceneObject[]>([])
+  const [placementKind, setPlacementKind] = useState<SceneObjectKind | null>(null)
+  const [activeStep, setActiveStep] = useState(1)
   const [sceneReady, setSceneReady] = useState(false)
-  const [command, setCommand] = useState<{ id: number; type: 'top' | 'perspective' | 'capture' }>({ id: 0, type: 'perspective' })
+  const [command, setCommand] = useState<{ id: number; type: 'top' | 'perspective' | 'capture' | 'snapshot' }>({ id: 0, type: 'perspective' })
+  const [renderPrompt, setRenderPrompt] = useState('Warm contemporary Singapore apartment, natural oak cabinetry, soft neutral upholstery, stone finishes, daylight, elegant realistic styling')
+  const [rendering, setRendering] = useState(false)
+  const [photorealUrl, setPhotorealUrl] = useState('')
+  const [renderError, setRenderError] = useState('')
   const [toast, setToast] = useState('')
   const [canvasVersion, setCanvasVersion] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -80,7 +89,6 @@ export default function PlanStudio() {
   }, [])
 
   const activeSegments = useMemo(() => segments.filter((segment) => segment.active), [segments])
-  const confidence = activeSegments.length ? Math.round(activeSegments.reduce((sum, segment) => sum + segment.confidence, 0) / activeSegments.length * 100) : 0
 
   const analyseFile = useCallback(async (file: File) => {
     setBusy(true); setStatus('Analysing drawing in your browser…')
@@ -92,7 +100,7 @@ export default function PlanStudio() {
       await htmlImage.decode()
       setRaster(loaded.raster); setImage(htmlImage)
       setCrop(result.crop); setSegments(result.segments); setProjectName(file.name)
-      setSceneSegments([]); setSceneReady(false); setStudio(true); setTool('select')
+      setSceneSegments([]); setSceneObjects([]); setSceneReady(false); setPhotorealUrl(''); setActiveStep(1); setStudio(true); setTool('select')
       setStatus('Geometry detected · review required')
       notify(`${result.segments.length} likely wall lines detected`)
     } catch (error) {
@@ -151,12 +159,29 @@ export default function PlanStudio() {
       if (!segment.active) context.setLineDash([5, 5])
       context.stroke(); context.setLineDash([])
     }
+    const pixelsPerMetre = cropWidth / Math.max(planWidth, 0.1)
+    for (const object of sceneObjects) {
+      const [objectX, objectY] = toCanvas(object.x, object.y)
+      context.save()
+      context.translate(objectX, objectY)
+      context.rotate(object.rotation)
+      const objectWidth = object.width * pixelsPerMetre * current.scale
+      const objectDepth = object.depth * pixelsPerMetre * current.scale
+      context.fillStyle = object.kind === 'window' ? 'rgba(52,163,200,.45)' : object.kind === 'door' ? 'rgba(139,94,60,.72)' : 'rgba(30,121,94,.55)'
+      context.strokeStyle = '#1e795e'; context.lineWidth = 2
+      context.fillRect(-objectWidth / 2, -objectDepth / 2, objectWidth, objectDepth)
+      context.strokeRect(-objectWidth / 2, -objectDepth / 2, objectWidth, objectDepth)
+      context.rotate(-object.rotation)
+      context.fillStyle = '#1c1917'; context.font = '600 10px DM Sans'; context.textAlign = 'center'
+      context.fillText(objectPresets[object.kind].label, 0, -objectDepth / 2 - 5)
+      context.restore()
+    }
     if (drag) {
       context.beginPath(); context.moveTo(...drag.start); context.lineTo(...drag.current)
       context.strokeStyle = tool === 'crop' ? '#8b5428' : '#1e795e'; context.lineWidth = 2; context.setLineDash([6, 4]); context.stroke(); context.setLineDash([])
       if (tool === 'crop') context.strokeRect(drag.start[0], drag.start[1], drag.current[0] - drag.start[0], drag.current[1] - drag.start[1])
     }
-  }, [image, raster, crop, segments, drag, tool, canvasVersion, fit, toCanvas])
+  }, [image, raster, crop, segments, sceneObjects, planWidth, drag, tool, canvasVersion, fit, toCanvas])
 
   const pointer = (event: PointerEvent<HTMLCanvasElement>): [number, number] => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -166,6 +191,13 @@ export default function PlanStudio() {
   const onPointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
     if (!image) return
     const point = pointer(event)
+    if (placementKind) {
+      const [x, y] = toImage(...point)
+      const preset = objectPresets[placementKind]
+      setSceneObjects((items) => [...items, { id: `o-${Date.now()}`, kind: placementKind, x, y, width: preset.width, depth: preset.depth, height: preset.height, rotation: 0 }])
+      setPlacementKind(null); setActiveStep(2); notify(`${preset.label} placed · use the object controls to rotate or remove it`)
+      return
+    }
     if (tool === 'select') {
       let best: WallSegment | null = null, distance = 10
       for (const segment of segments) {
@@ -203,14 +235,26 @@ export default function PlanStudio() {
 
   const buildScene = () => {
     if (!activeSegments.length) { notify('Keep or add at least one wall'); return }
-    setSceneSegments(segments.map((segment) => ({ ...segment }))); setSceneReady(false); setStatus('Building interactive 3D shell…')
-    window.setTimeout(() => { setStatus('3D shell ready'); notify('Interactive 3D shell built') }, 250)
+    setSceneSegments(segments.map((segment) => ({ ...segment }))); setSceneReady(false); setActiveStep(3); setStatus('Building editable 3D model…')
+    window.setTimeout(() => { setStatus('Editable 3D model ready'); notify('Walls, openings and furniture rendered in 3D') }, 250)
   }
-  const sendCommand = (type: 'top' | 'perspective' | 'capture') => setCommand((value) => ({ id: value.id + 1, type }))
+  const sendCommand = (type: 'top' | 'perspective' | 'capture' | 'snapshot') => setCommand((value) => ({ id: value.id + 1, type }))
   const onSceneReady = useCallback((ready: boolean) => setSceneReady(ready), [])
-  const reset = () => { setStudio(false); setSceneSegments([]); setSceneReady(false); setStatus('Ready for a layout plan'); setImage(null); setRaster(null); setSegments([]) }
+  const onSnapshot = useCallback(async (imageDataUrl: string) => {
+    setRendering(true); setRenderError(''); setPhotorealUrl(''); setActiveStep(4); setStatus('Generating photorealistic interior…')
+    try {
+      const response = await fetch('/api/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageDataUrl, prompt: renderPrompt }) })
+      const data = await response.json() as { imageUrl?: string; error?: string }
+      if (!response.ok || !data.imageUrl) throw new Error(data.error || 'Rendering failed')
+      setPhotorealUrl(data.imageUrl); setStatus('Photorealistic render ready'); notify('Photorealistic render completed')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Rendering failed'
+      setRenderError(message); setStatus('Photorealistic rendering needs attention'); notify(message)
+    } finally { setRendering(false) }
+  }, [renderPrompt, notify])
+  const reset = () => { setStudio(false); setSceneSegments([]); setSceneObjects([]); setSceneReady(false); setPhotorealUrl(''); setRenderError(''); setActiveStep(1); setStatus('Ready for a layout plan'); setImage(null); setRaster(null); setSegments([]) }
 
-  const toolHint = tool === 'select' ? 'Click a line to include or exclude it' : tool === 'add' ? 'Drag across the drawing to add a wall' : 'Drag a rectangle around the apartment plan'
+  const toolHint = placementKind ? `Click the plan to place ${objectPresets[placementKind].label}` : tool === 'select' ? 'Click a line to include or exclude it' : tool === 'add' ? 'Drag across the drawing to add a wall' : 'Drag a rectangle around the apartment plan'
 
   return <>
     <header className="topbar">
@@ -229,19 +273,25 @@ export default function PlanStudio() {
           <button className="sample" disabled={busy} onClick={async () => { const response = await fetch(`${BASE_PATH}/sample/Hui-Ting-Layout.pdf`); analyseFile(new File([await response.blob()], 'Hui Ting Layout.pdf', { type: 'application/pdf' })) }}>Use supplied Hui Ting layout</button>
         </div>
       </section> : <section className="studio">
-        <aside className="workflow-panel"><p className="eyebrow">Project workflow</p><ol className="steps"><li className="active"><span>1</span><div><strong>Plan geometry</strong><small>Review detected walls</small></div></li><li><span>2</span><div><strong>Scale & height</strong><small>Set real dimensions</small></div></li><li><span>3</span><div><strong>3D scene</strong><small>Orbit and compose</small></div></li><li><span>4</span><div><strong>Render</strong><small>Export current view</small></div></li></ol><div className="divider" />
+        <aside className="workflow-panel"><p className="eyebrow">Project workflow</p><ol className="steps">{[
+          ['Plan geometry', 'Review detected walls'], ['Scale & furnish', 'Add openings and furniture'], ['Editable 3D', 'Orbit and compose'], ['Photoreal render', 'Generate final image'],
+        ].map(([label, note], index) => <li key={label} className={activeStep === index + 1 ? 'active' : ''}><button onClick={() => setActiveStep(index + 1)}><span>{index + 1}</span><div><strong>{label}</strong><small>{note}</small></div></button></li>)}</ol><div className="divider" />
           <label>Plan width <span>metres</span><input type="number" min="1" max="100" step="0.1" value={planWidth} onChange={(event) => setPlanWidth(+event.target.value)} /></label>
           <label>Wall height <span>metres</span><input type="number" min="1.8" max="6" step="0.1" value={wallHeight} onChange={(event) => setWallHeight(+event.target.value)} /></label>
           <label>Wall thickness <span>metres</span><input type="number" min="0.05" max="0.6" step="0.01" value={wallThickness} onChange={(event) => setWallThickness(+event.target.value)} /></label>
           <label>Material direction<select value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}><option value="warm">Warm contemporary</option><option value="light">Light minimal</option><option value="dark">Dark modern</option></select></label>
-          <div className="metrics"><div><span>{activeSegments.length}</span><small>active walls</small></div><div><span>{activeSegments.length ? `${confidence}%` : '—'}</span><small>avg. confidence</small></div></div><button className="primary wide" onClick={buildScene}>Build 3D shell →</button>
+          <div className="object-heading"><strong>Place in model</strong><small>Choose, then click the plan</small></div><div className="object-palette">{(Object.keys(objectPresets) as SceneObjectKind[]).map((kind) => <button key={kind} className={placementKind === kind ? 'active' : ''} onClick={() => { setPlacementKind(kind); setActiveStep(2) }}>{objectPresets[kind].label}</button>)}</div>
+          {sceneObjects.length > 0 && <div className="object-list">{sceneObjects.map((object) => <div key={object.id}><span>{objectPresets[object.kind].label}</span><button title="Rotate" onClick={() => setSceneObjects((items) => items.map((item) => item.id === object.id ? { ...item, rotation: item.rotation + Math.PI / 2 } : item))}>↻</button><button title="Remove" onClick={() => setSceneObjects((items) => items.filter((item) => item.id !== object.id))}>×</button></div>)}</div>}
+          <div className="metrics"><div><span>{activeSegments.length}</span><small>active walls</small></div><div><span>{sceneObjects.length}</span><small>scene objects</small></div></div>
+          {activeStep < 2 ? <button className="primary wide" onClick={() => setActiveStep(2)}>Continue to Step 2 →</button> : <button className="primary wide" onClick={buildScene}>Build editable 3D model →</button>}
         </aside>
         <section className="workspace"><div className="workspace-head"><div><p className="eyebrow">Drawing review</p><h2>{projectName}</h2></div><div className="toolset">{(['select', 'add', 'crop'] as Tool[]).map((item) => <button key={item} className={`tool ${tool === item ? 'active' : ''}`} onClick={() => setTool(item)}>{item === 'select' ? 'Review' : item === 'add' ? 'Add wall' : 'Crop & re-detect'}</button>)}</div></div>
           <div className="canvas-wrap" ref={wrapRef}><canvas ref={canvasRef} onPointerDown={onPointerDown} onPointerMove={(event) => drag && setDrag({ ...drag, current: pointer(event) })} onPointerUp={onPointerUp} /><div className="canvas-hint">{toolHint}</div></div>
           <div className="legend"><span><i className="red" />Detected wall</span><span><i className="green" />Manually added</span><span><i className="grey" />Excluded</span><span className="legend-note">The image remains the source of truth while you correct the overlay.</span></div>
         </section>
-        <section className="viewer-panel"><div className="viewer-head"><div><p className="eyebrow">Live 3D shell</p><h2>Camera view</h2></div><span className="chip">{sceneReady ? 'Live geometry' : 'Awaiting geometry'}</span></div><div className="viewer">{sceneSegments.length ? <ThreeScene segments={sceneSegments} crop={crop} planWidth={planWidth} wallHeight={wallHeight} wallThickness={wallThickness} theme={theme} command={command} onReady={onSceneReady} /> : <div className="viewer-empty"><span>◇</span><strong>No scene yet</strong><small>Review the plan and build the 3D shell.</small></div>}</div>
-          <div className="viewer-actions"><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('top')}>Top view</button><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('perspective')}>Perspective</button><button className="dark" disabled={!sceneReady} onClick={() => sendCommand('capture')}>Capture render</button></div><div className="accuracy"><strong>Current output</strong><p>An editable architectural shell generated from the approved line overlay. Decorative AI furnishing remains a separate provider integration.</p></div>
+        <section className="viewer-panel"><div className="viewer-head"><div><p className="eyebrow">Editable 3D + AI render</p><h2>Camera view</h2></div><span className="chip">{sceneReady ? 'Live geometry' : 'Awaiting geometry'}</span></div><div className="viewer">{sceneSegments.length ? <ThreeScene segments={sceneSegments} objects={sceneObjects} crop={crop} planWidth={planWidth} wallHeight={wallHeight} wallThickness={wallThickness} theme={theme} command={command} onReady={onSceneReady} onSnapshot={onSnapshot} /> : <div className="viewer-empty"><span>◇</span><strong>No model yet</strong><small>Complete Steps 1–2 and build the editable 3D model.</small></div>}</div>
+          <div className="viewer-actions"><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('top')}>Top view</button><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('perspective')}>Perspective</button><button className="dark" disabled={!sceneReady} onClick={() => sendCommand('capture')}>Download 3D view</button></div>
+          <div className="render-panel"><strong>Photorealistic render</strong><textarea value={renderPrompt} onChange={(event) => setRenderPrompt(event.target.value)} rows={3} placeholder="Describe materials, furniture style and lighting" /><button className="primary wide" disabled={!sceneReady || rendering} onClick={() => sendCommand('snapshot')}>{rendering ? 'Generating photorealistic image…' : 'Generate photorealistic render'}</button>{renderError && <p className="render-error">{renderError}</p>}{photorealUrl && <div className="photoreal-result"><NextImage unoptimized width={1200} height={675} src={photorealUrl} alt="AI-generated photorealistic interior render" /><a href={photorealUrl} target="_blank" rel="noreferrer">Open full-resolution render ↗</a></div>}</div>
         </section>
       </section>}
     </main>

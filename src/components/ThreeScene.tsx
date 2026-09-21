@@ -3,17 +3,20 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import type { Crop, WallSegment } from '@/lib/types'
+import type { Crop, SceneObject, WallSegment } from '@/lib/types'
+import { objectPresets } from '@/lib/scene-objects'
 
 type Props = {
   segments: WallSegment[]
+  objects: SceneObject[]
   crop: Crop
   planWidth: number
   wallHeight: number
   wallThickness: number
   theme: 'warm' | 'light' | 'dark'
-  command: { id: number; type: 'top' | 'perspective' | 'capture' }
+  command: { id: number; type: 'top' | 'perspective' | 'capture' | 'snapshot' }
   onReady: (ready: boolean) => void
+  onSnapshot: (dataUrl: string) => void
 }
 
 type SceneState = {
@@ -33,7 +36,7 @@ const palettes = {
   dark: { wall: 0x756d65, floor: 0x403a35, background: 0xaaa39d },
 }
 
-export default function ThreeScene({ segments, crop, planWidth, wallHeight, wallThickness, theme, command, onReady }: Props) {
+export default function ThreeScene({ segments, objects, crop, planWidth, wallHeight, wallThickness, theme, command, onReady, onSnapshot }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef<SceneState | null>(null)
 
@@ -83,6 +86,23 @@ export default function ThreeScene({ segments, crop, planWidth, wallHeight, wall
       mesh.receiveShadow = true
       scene.add(mesh)
     }
+    for (const object of objects) {
+      const preset = objectPresets[object.kind]
+      const x = (object.x - cropX) * scale - planWidth / 2
+      const z = (object.y - cropY) * scale - depth / 2
+      const material = new THREE.MeshStandardMaterial({
+        color: preset.color,
+        roughness: object.kind === 'window' ? 0.2 : 0.7,
+        transparent: object.kind === 'window',
+        opacity: object.kind === 'window' ? 0.55 : 1,
+      })
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(object.width, object.height, object.depth), material)
+      mesh.position.set(x, object.kind === 'window' ? 1.45 : object.height / 2, z)
+      mesh.rotation.y = object.rotation
+      mesh.castShadow = object.kind !== 'window'
+      mesh.receiveShadow = true
+      scene.add(mesh)
+    }
     scene.add(new THREE.HemisphereLight(0xfff7eb, 0x5a5149, 2.25))
     const sun = new THREE.DirectionalLight(0xfff1d6, 3.4)
     sun.position.set(-8, 15, -5)
@@ -129,7 +149,7 @@ export default function ThreeScene({ segments, crop, planWidth, wallHeight, wall
       if (stateRef.current === current) stateRef.current = null
       host.replaceChildren()
     }
-  }, [segments, crop, planWidth, wallHeight, wallThickness, theme, onReady])
+  }, [segments, objects, crop, planWidth, wallHeight, wallThickness, theme, onReady])
 
   useEffect(() => {
     const current = stateRef.current
@@ -142,14 +162,17 @@ export default function ThreeScene({ segments, crop, planWidth, wallHeight, wall
       current.camera.position.set(current.width * 0.72, Math.max(8, current.width * 0.58), current.depth * 0.85)
       current.controls.target.set(0, current.height * 0.45, 0)
       current.controls.update()
-    } else {
+    } else if (command.type === 'capture') {
       current.renderer.render(current.scene, current.camera)
       const anchor = document.createElement('a')
       anchor.download = `renderline-${Date.now()}.png`
       anchor.href = current.renderer.domElement.toDataURL('image/png')
       anchor.click()
+    } else {
+      current.renderer.render(current.scene, current.camera)
+      onSnapshot(current.renderer.domElement.toDataURL('image/jpeg', 0.82))
     }
-  }, [command])
+  }, [command, onSnapshot])
 
   return <div className="three-host" ref={hostRef} aria-label="Interactive 3D wall model" />
 }

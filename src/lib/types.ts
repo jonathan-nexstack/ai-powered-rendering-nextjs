@@ -9,6 +9,19 @@ export type WallSegment = {
   manual?: boolean
 }
 
+export type SceneObjectKind = 'door' | 'window' | 'sofa' | 'bed' | 'table' | 'cabinet'
+
+export type SceneObject = {
+  id: string
+  kind: SceneObjectKind
+  x: number
+  y: number
+  width: number
+  depth: number
+  height: number
+  rotation: number
+}
+
 export type Crop = [number, number, number, number]
 
 export type Raster = {
