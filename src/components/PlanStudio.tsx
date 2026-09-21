@@ -11,6 +11,9 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
 
 type Tool = 'select' | 'add' | 'crop'
 type Drag = { start: [number, number]; current: [number, number] }
+type CameraView = 'A' | 'B' | 'C' | 'D'
+type SceneCommand = 'top' | 'perspective' | 'view-a' | 'view-b' | 'view-c' | 'view-d' | 'capture' | 'snapshot'
+type RenderedView = { id: string; label: CameraView; imageUrl: string; shellUrl: string }
 
 async function canvasFromFile(file: File): Promise<{ raster: Raster; imageUrl: string }> {
   const canvas = document.createElement('canvas')
@@ -70,11 +73,15 @@ export default function PlanStudio() {
   const [placementKind, setPlacementKind] = useState<SceneObjectKind | null>(null)
   const [activeStep, setActiveStep] = useState(1)
   const [sceneReady, setSceneReady] = useState(false)
-  const [command, setCommand] = useState<{ id: number; type: 'top' | 'perspective' | 'capture' | 'snapshot' }>({ id: 0, type: 'perspective' })
+  const [command, setCommand] = useState<{ id: number; type: SceneCommand }>({ id: 0, type: 'perspective' })
+  const [cameraView, setCameraView] = useState<CameraView>('A')
   const [renderPrompt, setRenderPrompt] = useState('Warm contemporary Singapore apartment, natural oak cabinetry, soft neutral upholstery, stone finishes, daylight, elegant realistic styling')
   const [rendering, setRendering] = useState(false)
   const [renderAccessCode, setRenderAccessCode] = useState('')
   const [photorealUrl, setPhotorealUrl] = useState('')
+  const [shellUrl, setShellUrl] = useState('')
+  const [renderedViews, setRenderedViews] = useState<RenderedView[]>([])
+  const [comparison, setComparison] = useState(100)
   const [renderError, setRenderError] = useState('')
   const [toast, setToast] = useState('')
   const [canvasVersion, setCanvasVersion] = useState(0)
@@ -101,7 +108,7 @@ export default function PlanStudio() {
       await htmlImage.decode()
       setRaster(loaded.raster); setImage(htmlImage)
       setCrop(result.crop); setSegments(result.segments); setProjectName(file.name)
-      setSceneSegments([]); setSceneObjects([]); setSceneReady(false); setPhotorealUrl(''); setActiveStep(1); setStudio(true); setTool('select')
+      setSceneSegments([]); setSceneObjects([]); setSceneReady(false); setPhotorealUrl(''); setShellUrl(''); setRenderedViews([]); setActiveStep(1); setStudio(true); setTool('select')
       setStatus('Geometry detected · review required')
       notify(`${result.segments.length} likely wall lines detected`)
     } catch (error) {
@@ -239,13 +246,19 @@ export default function PlanStudio() {
     setSceneSegments(segments.map((segment) => ({ ...segment }))); setSceneReady(false); setActiveStep(3); setStatus('Building editable 3D model…')
     window.setTimeout(() => { setStatus('Editable 3D model ready'); notify('Walls, openings and furniture rendered in 3D') }, 250)
   }
-  const sendCommand = (type: 'top' | 'perspective' | 'capture' | 'snapshot') => setCommand((value) => ({ id: value.id + 1, type }))
+  const sendCommand = (type: SceneCommand) => setCommand((value) => ({ id: value.id + 1, type }))
+  const chooseCameraView = (view: CameraView) => {
+    setCameraView(view)
+    sendCommand(`view-${view.toLowerCase()}` as SceneCommand)
+    setActiveStep(3)
+  }
   const onSceneReady = useCallback((ready: boolean) => setSceneReady(ready), [])
   const onSnapshot = useCallback(async (imageDataUrl: string) => {
-    setRendering(true); setRenderError(''); setPhotorealUrl(''); setActiveStep(4); setStatus('Submitting photorealistic render…')
+    setRendering(true); setRenderError(''); setActiveStep(4); setStatus(`Submitting photorealistic View ${cameraView}…`)
     try {
       const renderHeaders = { 'Content-Type': 'application/json', 'x-render-access-code': renderAccessCode }
-      const response = await fetch('/api/render', { method: 'POST', headers: renderHeaders, body: JSON.stringify({ imageDataUrl, prompt: renderPrompt }) })
+      const cameraPrompt = `${renderPrompt}. View ${cameraView}: eye-level interior architectural photography at approximately 1.6 metres, natural wide-angle lens, composed as a finished residential room rather than an overhead model.`
+      const response = await fetch('/api/render', { method: 'POST', headers: renderHeaders, body: JSON.stringify({ imageDataUrl, prompt: cameraPrompt }) })
       const submission = await response.json() as { requestId?: string; error?: string }
       if (!response.ok || !submission.requestId) throw new Error(submission.error || 'Rendering failed')
       setStatus('Render queued · waiting for the image model…')
@@ -255,7 +268,10 @@ export default function PlanStudio() {
         const result = await poll.json() as { status?: string; imageUrl?: string; error?: string }
         if (!poll.ok || result.status === 'FAILED') throw new Error(result.error || 'Rendering failed')
         if (result.status === 'COMPLETED' && result.imageUrl) {
-          setPhotorealUrl(result.imageUrl); setStatus('Photorealistic render ready'); notify('Photorealistic render completed')
+          const completed = { id: `${cameraView}-${Date.now()}`, label: cameraView, imageUrl: result.imageUrl, shellUrl: imageDataUrl }
+          setPhotorealUrl(result.imageUrl); setShellUrl(imageDataUrl); setComparison(100)
+          setRenderedViews((items) => [completed, ...items.filter((item) => item.label !== cameraView)])
+          setStatus(`Photorealistic View ${cameraView} ready`); notify(`Photorealistic View ${cameraView} completed`)
           return
         }
         setStatus(result.status === 'IN_QUEUE' ? 'Render queued · waiting for capacity…' : 'Creating photorealistic interior…')
@@ -265,8 +281,8 @@ export default function PlanStudio() {
       const message = error instanceof Error ? error.message : 'Rendering failed'
       setRenderError(message); setStatus('Photorealistic rendering needs attention'); notify(message)
     } finally { setRendering(false) }
-  }, [renderAccessCode, renderPrompt, notify])
-  const reset = () => { setStudio(false); setSceneSegments([]); setSceneObjects([]); setSceneReady(false); setPhotorealUrl(''); setRenderError(''); setActiveStep(1); setStatus('Ready for a layout plan'); setImage(null); setRaster(null); setSegments([]) }
+  }, [cameraView, renderAccessCode, renderPrompt, notify])
+  const reset = () => { setStudio(false); setSceneSegments([]); setSceneObjects([]); setSceneReady(false); setPhotorealUrl(''); setShellUrl(''); setRenderedViews([]); setRenderError(''); setActiveStep(1); setStatus('Ready for a layout plan'); setImage(null); setRaster(null); setSegments([]) }
 
   const toolHint = placementKind ? `Click the plan to place ${objectPresets[placementKind].label}` : tool === 'select' ? 'Click a line to include or exclude it' : tool === 'add' ? 'Drag across the drawing to add a wall' : 'Drag a rectangle around the apartment plan'
 
@@ -304,8 +320,25 @@ export default function PlanStudio() {
           <div className="legend"><span><i className="red" />Detected wall</span><span><i className="green" />Manually added</span><span><i className="grey" />Excluded</span><span className="legend-note">The image remains the source of truth while you correct the overlay.</span></div>
         </section>
         <section className="viewer-panel"><div className="viewer-head"><div><p className="eyebrow">Editable 3D + AI render</p><h2>Camera view</h2></div><span className="chip">{sceneReady ? 'Live geometry' : 'Awaiting geometry'}</span></div><div className="viewer">{sceneSegments.length ? <ThreeScene segments={sceneSegments} objects={sceneObjects} crop={crop} planWidth={planWidth} wallHeight={wallHeight} wallThickness={wallThickness} theme={theme} command={command} onReady={onSceneReady} onSnapshot={onSnapshot} /> : <div className="viewer-empty"><span>◇</span><strong>No model yet</strong><small>Complete Steps 1–2 and build the editable 3D model.</small></div>}</div>
-          <div className="viewer-actions"><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('top')}>Top view</button><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('perspective')}>Perspective</button><button className="dark" disabled={!sceneReady} onClick={() => sendCommand('capture')}>Download 3D view</button></div>
-          <div className="render-panel"><strong>Photorealistic render</strong><label className="demo-code-label">Demo access code<input type="password" autoComplete="off" value={renderAccessCode} onChange={(event) => setRenderAccessCode(event.target.value)} placeholder="Required on the public demo" /></label><textarea value={renderPrompt} onChange={(event) => setRenderPrompt(event.target.value)} rows={3} placeholder="Describe materials, furniture style and lighting" /><button className="primary wide" disabled={!sceneReady || rendering} onClick={() => sendCommand('snapshot')}>{rendering ? 'Generating photorealistic image…' : 'Generate photorealistic render'}</button>{renderError && <p className="render-error">{renderError}</p>}{photorealUrl && <div className="photoreal-result"><NextImage unoptimized width={1200} height={675} src={photorealUrl} alt="AI-generated photorealistic interior render" /><a href={photorealUrl} target="_blank" rel="noreferrer">Open full-resolution render ↗</a></div>}</div>
+          <div className="viewer-actions"><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('top')}>Top view</button><button className="ghost" disabled={!sceneReady} onClick={() => sendCommand('perspective')}>Model overview</button><button className="dark" disabled={!sceneReady} onClick={() => sendCommand('capture')}>Download 3D view</button></div>
+          <div className="camera-presets"><span>Interior camera</span>{(['A', 'B', 'C', 'D'] as CameraView[]).map((view) => <button key={view} className={cameraView === view ? 'active' : ''} disabled={!sceneReady} onClick={() => chooseCameraView(view)}>View {view}</button>)}</div>
+          <div className="render-panel">
+            <div className="render-title"><strong>Photorealistic interior views</strong><span>View {cameraView}</span></div>
+            <label className="demo-code-label">Demo access code<input type="password" autoComplete="off" value={renderAccessCode} onChange={(event) => setRenderAccessCode(event.target.value)} placeholder="Required on the public demo" /></label>
+            <textarea value={renderPrompt} onChange={(event) => setRenderPrompt(event.target.value)} rows={3} placeholder="Describe materials, furniture style and lighting" />
+            <button className="primary wide" disabled={!sceneReady || rendering} onClick={() => sendCommand('snapshot')}>{rendering ? `Generating View ${cameraView}…` : `Generate photorealistic View ${cameraView}`}</button>
+            {renderError && <p className="render-error">{renderError}</p>}
+            {photorealUrl && shellUrl && <div className="photoreal-result">
+              <div className="render-comparison">
+                <NextImage unoptimized fill src={shellUrl} alt={`Three-dimensional shell for View ${cameraView}`} />
+                <div className="ai-layer" style={{ clipPath: `inset(0 ${100 - comparison}% 0 0)` }}><NextImage unoptimized fill src={photorealUrl} alt={`AI-generated photorealistic interior View ${cameraView}`} /></div>
+                <div className="render-badges"><span>Interior · View {cameraView}</span><span>Ceiling {Math.round(wallHeight * 1000).toLocaleString()} mm</span></div>
+              </div>
+              <label className="comparison-control"><span>Shell</span><input type="range" min="0" max="100" value={comparison} onChange={(event) => setComparison(+event.target.value)} /><span>AI render</span></label>
+              <a href={photorealUrl} target="_blank" rel="noreferrer">Open full-resolution render ↗</a>
+            </div>}
+            {renderedViews.length > 0 && <div className="render-gallery">{renderedViews.slice().sort((a, b) => a.label.localeCompare(b.label)).map((view) => <button key={view.id} className={photorealUrl === view.imageUrl ? 'active' : ''} onClick={() => { setCameraView(view.label); setPhotorealUrl(view.imageUrl); setShellUrl(view.shellUrl); setComparison(100) }}><NextImage unoptimized width={180} height={108} src={view.imageUrl} alt={`Rendered View ${view.label}`} /><span>{view.label}</span></button>)}</div>}
+          </div>
         </section>
       </section>}
     </main>

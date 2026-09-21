@@ -14,7 +14,7 @@ type Props = {
   wallHeight: number
   wallThickness: number
   theme: 'warm' | 'light' | 'dark'
-  command: { id: number; type: 'top' | 'perspective' | 'capture' | 'snapshot' }
+  command: { id: number; type: 'top' | 'perspective' | 'view-a' | 'view-b' | 'view-c' | 'view-d' | 'capture' | 'snapshot' }
   onReady: (ready: boolean) => void
   onSnapshot: (dataUrl: string) => void
 }
@@ -155,12 +155,37 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
     const current = stateRef.current
     if (!current || command.id === 0) return
     if (command.type === 'top') {
+      current.camera.fov = 48
+      current.camera.updateProjectionMatrix()
       current.camera.position.set(0, Math.max(current.width, current.depth) * 1.35, 0.01)
       current.controls.target.set(0, 0, 0)
       current.controls.update()
     } else if (command.type === 'perspective') {
+      current.camera.fov = 48
+      current.camera.updateProjectionMatrix()
       current.camera.position.set(current.width * 0.72, Math.max(8, current.width * 0.58), current.depth * 0.85)
       current.controls.target.set(0, current.height * 0.45, 0)
+      current.controls.update()
+    } else if (command.type.startsWith('view-')) {
+      const eye = Math.min(1.65, current.height * 0.62)
+      const targetY = Math.min(1.35, current.height * 0.5)
+      const positions = {
+        'view-a': [-current.width * 0.34, eye, current.depth * 0.3],
+        'view-b': [current.width * 0.34, eye, current.depth * 0.3],
+        'view-c': [-current.width * 0.34, eye, -current.depth * 0.3],
+        'view-d': [current.width * 0.34, eye, -current.depth * 0.3],
+      } as const
+      const targets = {
+        'view-a': [current.width * 0.2, targetY, -current.depth * 0.18],
+        'view-b': [-current.width * 0.2, targetY, -current.depth * 0.18],
+        'view-c': [current.width * 0.2, targetY, current.depth * 0.18],
+        'view-d': [-current.width * 0.2, targetY, current.depth * 0.18],
+      } as const
+      const view = command.type as keyof typeof positions
+      current.camera.fov = 62
+      current.camera.updateProjectionMatrix()
+      current.camera.position.set(...positions[view])
+      current.controls.target.set(...targets[view])
       current.controls.update()
     } else if (command.type === 'capture') {
       current.renderer.render(current.scene, current.camera)
