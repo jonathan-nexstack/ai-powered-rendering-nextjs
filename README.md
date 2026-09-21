@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Renderline — Next.js Plan-to-3D Studio
 
-## Getting Started
+A browser-native floor-plan analysis and interactive 3D shell generator built with **Next.js 16.3.5**, React 19, TypeScript, PDF.js and Three.js.
 
-First, run the development server:
+## Features
+
+- PDF, PNG, JPG and WEBP plan input
+- Browser-local processing; plans are not uploaded to an application backend
+- Automatic main-plan crop suggestion and wall-line extraction
+- Editable wall overlay: include/exclude, manually add and crop/re-detect
+- User-controlled plan width, wall height and wall thickness
+- Interactive Three.js scene with top and perspective views
+- Warm, light and dark material directions
+- PNG render capture
+- Static export suitable for GitHub Pages
+
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Quality gates
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm test
+npm run lint
+npm run typecheck
+npm run build
+npm audit
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Product boundary
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The current version creates a deterministic architectural wall shell. Photorealistic furnishing remains a separate image-generation-provider integration so the interface does not imply unimplemented AI rendering.
