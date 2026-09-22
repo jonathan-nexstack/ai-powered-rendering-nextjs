@@ -14,7 +14,7 @@ type Props = {
   wallHeight: number
   wallThickness: number
   theme: 'warm' | 'light' | 'dark'
-  command: { id: number; type: 'top' | 'perspective' | 'view-a' | 'view-b' | 'view-c' | 'view-d' | 'capture' | 'snapshot' }
+  command: { id: number; type: 'top' | 'perspective' | 'view-a' | 'view-b' | 'view-c' | 'view-d' | 'fit' | 'pan-left' | 'pan-right' | 'pan-up' | 'pan-down' | 'zoom-in' | 'zoom-out' | 'capture' | 'snapshot' }
   onReady: (ready: boolean) => void
   onSnapshot: (dataUrl: string) => void
 }
@@ -59,6 +59,26 @@ function fitWholeModel(current: SceneState, view: 'top' | 'perspective') {
   controls.update()
 }
 
+function panCamera(current: SceneState, horizontal: number, vertical: number) {
+  const { camera, controls } = current
+  camera.updateMatrixWorld()
+  const distance = camera.position.distanceTo(controls.target)
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(horizontal * distance * 0.1)
+  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).multiplyScalar(vertical * distance * 0.1)
+  const offset = right.add(up)
+  camera.position.add(offset)
+  controls.target.add(offset)
+  controls.update()
+}
+
+function zoomCamera(current: SceneState, factor: number) {
+  const offset = current.camera.position.clone().sub(current.controls.target)
+  const nextDistance = THREE.MathUtils.clamp(offset.length() * factor, 2, 120)
+  offset.setLength(nextDistance)
+  current.camera.position.copy(current.controls.target).add(offset)
+  current.controls.update()
+}
+
 const palettes = {
   warm: { wall: 0xf0e6da, floor: 0x8d6b4d, background: 0xd7d0c8 },
   light: { wall: 0xf5f3ee, floor: 0xc9b79f, background: 0xe8e7e3 },
@@ -91,6 +111,14 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
     const camera = new THREE.PerspectiveCamera(48, 1, 0.05, 200)
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
+    controls.enablePan = true
+    controls.enableRotate = true
+    controls.enableZoom = true
+    controls.screenSpacePanning = true
+    controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE
+    controls.mouseButtons.RIGHT = THREE.MOUSE.PAN
+    controls.touches.ONE = THREE.TOUCH.ROTATE
+    controls.touches.TWO = THREE.TOUCH.DOLLY_PAN
     controls.maxPolarAngle = Math.PI / 2.02
     const [cropX, cropY, cropWidth, cropHeight] = crop
     const scale = planWidth / cropWidth
@@ -189,6 +217,21 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
     } else if (command.type === 'perspective') {
       current.viewMode = 'perspective'
       fitWholeModel(current, 'perspective')
+    } else if (command.type === 'fit') {
+      current.viewMode = 'perspective'
+      fitWholeModel(current, 'perspective')
+    } else if (command.type === 'pan-left') {
+      panCamera(current, 1, 0)
+    } else if (command.type === 'pan-right') {
+      panCamera(current, -1, 0)
+    } else if (command.type === 'pan-up') {
+      panCamera(current, 0, -1)
+    } else if (command.type === 'pan-down') {
+      panCamera(current, 0, 1)
+    } else if (command.type === 'zoom-in') {
+      zoomCamera(current, 0.8)
+    } else if (command.type === 'zoom-out') {
+      zoomCamera(current, 1.25)
     } else if (command.type.startsWith('view-')) {
       current.viewMode = 'camera'
       const eye = Math.min(1.65, current.height * 0.62)
