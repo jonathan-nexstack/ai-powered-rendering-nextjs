@@ -15,9 +15,11 @@ export async function POST(request: Request) {
   const contentLength = Number(request.headers.get('content-length') ?? 0)
   if (contentLength && contentLength > 4_000_000) return NextResponse.json({ error: 'The camera snapshot is too large.' }, { status: 413 })
 
-  const body = await request.json().catch(() => null) as { imageDataUrl?: unknown; prompt?: unknown } | null
+  const body = await request.json().catch(() => null) as { imageDataUrl?: unknown; prompt?: unknown; numImages?: unknown } | null
   if (!body || typeof body.imageDataUrl !== 'string') return NextResponse.json({ error: 'A valid 3D camera snapshot is required.' }, { status: 400 })
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 1800) return NextResponse.json({ error: 'Enter a rendering prompt of up to 1,800 characters.' }, { status: 400 })
+  const numImages = body.numImages === undefined ? 1 : Number(body.numImages)
+  if (![1, 2, 4].includes(numImages)) return NextResponse.json({ error: 'Generate 1, 2 or 4 variants at a time.' }, { status: 400 })
 
   const match = DATA_URL_RE.exec(body.imageDataUrl)
   if (!match) return NextResponse.json({ error: 'Only JPEG, PNG or WebP camera snapshots are accepted.' }, { status: 400 })
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
         prompt: `${body.prompt.trim()}. Preserve the exact room geometry, wall positions, openings, camera angle and spatial proportions from the supplied 3D reference. Produce a polished photorealistic interior architectural visualization.`,
         image_urls: [body.imageDataUrl],
         num_inference_steps: 4,
-        num_images: 1,
+        num_images: numImages,
         output_format: 'jpeg',
         enable_safety_checker: true,
       }),

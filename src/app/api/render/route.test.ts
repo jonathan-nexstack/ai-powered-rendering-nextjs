@@ -43,6 +43,17 @@ describe('photorealistic render API', () => {
     expect(response.status).toBe(400)
   })
 
+  it('rejects unsupported batch sizes before calling the provider', async () => {
+    process.env.FAL_KEY = 'test-key'
+    delete process.env.RENDER_ACCESS_CODE
+    const response = await POST(new Request('http://localhost/api/render', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageDataUrl: 'data:image/jpeg;base64,abc=', prompt: 'warm interior', numImages: 3 }),
+    }))
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('1, 2 or 4') })
+  })
+
   it('rejects invalid queue request IDs before polling the provider', async () => {
     process.env.FAL_KEY = 'test-key'
     delete process.env.RENDER_ACCESS_CODE

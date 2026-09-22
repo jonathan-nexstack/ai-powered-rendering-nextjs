@@ -27,9 +27,9 @@ export async function GET(request: Request, context: Context) {
 
     const resultResponse = await fetch(`${BASE}/${encodedId}`, { headers, cache: 'no-store', signal: AbortSignal.timeout(15_000) })
     const result = await resultResponse.json().catch(() => null) as { images?: Array<{ url?: string }> } | null
-    const imageUrl = result?.images?.[0]?.url
-    if (!resultResponse.ok || !imageUrl) return NextResponse.json({ error: 'The provider returned no render.' }, { status: resultResponse.status || 502 })
-    return NextResponse.json({ requestId, status: 'COMPLETED', imageUrl })
+    const imageUrls = result?.images?.map((image) => image.url).filter((url): url is string => Boolean(url)) ?? []
+    if (!resultResponse.ok || !imageUrls.length) return NextResponse.json({ error: 'The provider returned no render.' }, { status: resultResponse.status || 502 })
+    return NextResponse.json({ requestId, status: 'COMPLETED', imageUrl: imageUrls[0], imageUrls })
   } catch (error) {
     console.error('FAL status check failed', error instanceof Error ? error.message : 'unknown error')
     return NextResponse.json({ error: 'Unable to reach the rendering provider.' }, { status: 502 })
