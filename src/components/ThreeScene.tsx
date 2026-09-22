@@ -68,11 +68,14 @@ const palettes = {
 export default function ThreeScene({ segments, objects, crop, planWidth, wallHeight, wallThickness, theme, command, onReady, onSnapshot }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef<SceneState | null>(null)
-
+  const onReadyRef = useRef(onReady)
+  const onSnapshotRef = useRef(onSnapshot)
+  useEffect(() => { onReadyRef.current = onReady }, [onReady])
+  useEffect(() => { onSnapshotRef.current = onSnapshot }, [onSnapshot])
   useEffect(() => {
     const host = hostRef.current
     const active = segments.filter((segment) => segment.active)
-    if (!host || !active.length) { onReady(false); return }
+    if (!host || !active.length) { onReadyRef.current(false); return }
     host.replaceChildren()
     const colors = palettes[theme]
     const scene = new THREE.Scene()
@@ -159,7 +162,7 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
       current.frame = requestAnimationFrame(animate)
     }
     animate()
-    onReady(true)
+    onReadyRef.current(true)
     return () => {
       observer.disconnect()
       cancelAnimationFrame(current.frame)
@@ -175,7 +178,7 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
       if (stateRef.current === current) stateRef.current = null
       host.replaceChildren()
     }
-  }, [segments, objects, crop, planWidth, wallHeight, wallThickness, theme, onReady])
+  }, [segments, objects, crop, planWidth, wallHeight, wallThickness, theme])
 
   useEffect(() => {
     const current = stateRef.current
@@ -216,9 +219,9 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
       anchor.click()
     } else {
       current.renderer.render(current.scene, current.camera)
-      onSnapshot(current.renderer.domElement.toDataURL('image/jpeg', 0.82))
+      onSnapshotRef.current(current.renderer.domElement.toDataURL('image/jpeg', 0.82))
     }
-  }, [command, onSnapshot])
+  }, [command])
 
   return <div className="three-host" ref={hostRef} aria-label="Interactive 3D wall model" />
 }
