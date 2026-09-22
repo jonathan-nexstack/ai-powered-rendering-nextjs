@@ -27,7 +27,36 @@ type SceneState = {
   width: number
   depth: number
   height: number
+  viewMode: 'top' | 'perspective' | 'camera'
   frame: number
+}
+
+function fitWholeModel(current: SceneState, view: 'top' | 'perspective') {
+  const { camera, controls, width, depth, height } = current
+  camera.fov = 48
+  camera.up.set(0, 1, 0)
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov)
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(camera.aspect, 0.1))
+
+  if (view === 'top') {
+    const distance = Math.max(
+      (depth / 2) / Math.tan(verticalFov / 2),
+      (width / 2) / Math.tan(horizontalFov / 2),
+    ) * 1.18
+    camera.position.set(0, Math.max(distance, height * 2), 0.01)
+    controls.target.set(0, 0, 0)
+  } else {
+    const limitingFov = Math.min(verticalFov, horizontalFov)
+    const radius = Math.hypot(width / 2, depth / 2, height / 2)
+    const distance = (radius / Math.sin(limitingFov / 2)) * 1.12
+    const target = new THREE.Vector3(0, height * 0.42, 0)
+    const direction = new THREE.Vector3(1, 0.72, 1.08).normalize()
+    camera.position.copy(target).addScaledVector(direction, distance)
+    controls.target.copy(target)
+  }
+
+  camera.updateProjectionMatrix()
+  controls.update()
 }
 
 const palettes = {
@@ -111,22 +140,19 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
     sun.shadow.camera.left = -20; sun.shadow.camera.right = 20
     sun.shadow.camera.top = 20; sun.shadow.camera.bottom = -20
     scene.add(sun)
-    camera.position.set(planWidth * 0.72, Math.max(8, planWidth * 0.58), depth * 0.85)
-    controls.target.set(0, wallHeight * 0.45, 0)
-    controls.update()
-
+    const current: SceneState = { renderer, scene, camera, controls, width: planWidth, depth, height: wallHeight, viewMode: 'perspective', frame: 0 }
+    stateRef.current = current
     const resize = () => {
       const width = host.clientWidth
       const height = host.clientHeight
       renderer.setSize(width, height, false)
       camera.aspect = width / Math.max(height, 1)
       camera.updateProjectionMatrix()
+      if (current.viewMode !== 'camera') fitWholeModel(current, current.viewMode)
     }
     const observer = new ResizeObserver(resize)
     observer.observe(host)
     resize()
-    const current: SceneState = { renderer, scene, camera, controls, width: planWidth, depth, height: wallHeight, frame: 0 }
-    stateRef.current = current
     const animate = () => {
       controls.update()
       renderer.render(scene, camera)
@@ -155,18 +181,13 @@ export default function ThreeScene({ segments, objects, crop, planWidth, wallHei
     const current = stateRef.current
     if (!current || command.id === 0) return
     if (command.type === 'top') {
-      current.camera.fov = 48
-      current.camera.updateProjectionMatrix()
-      current.camera.position.set(0, Math.max(current.width, current.depth) * 1.35, 0.01)
-      current.controls.target.set(0, 0, 0)
-      current.controls.update()
+      current.viewMode = 'top'
+      fitWholeModel(current, 'top')
     } else if (command.type === 'perspective') {
-      current.camera.fov = 48
-      current.camera.updateProjectionMatrix()
-      current.camera.position.set(current.width * 0.72, Math.max(8, current.width * 0.58), current.depth * 0.85)
-      current.controls.target.set(0, current.height * 0.45, 0)
-      current.controls.update()
+      current.viewMode = 'perspective'
+      fitWholeModel(current, 'perspective')
     } else if (command.type.startsWith('view-')) {
+      current.viewMode = 'camera'
       const eye = Math.min(1.65, current.height * 0.62)
       const targetY = Math.min(1.35, current.height * 0.5)
       const positions = {
